@@ -16,10 +16,15 @@
     <div class="nav-right">
       {% if current_user.is_authenticated %}
         <a href="{{ url_for('dashboard') }}">Dashboard</a>
-        {% if current_user.role == 'admin' %}
-        <a href="{{ url_for('admin_users', _external=False) if 'admin_users' in current_app.view_functions else '#' }}">Admin</a>
 
+        {% if current_user.role == 'admin' %}
+          {% if 'admin_users' in current_app.view_functions %}
+            <a href="{{ url_for('admin_users') }}">Admin</a>
+          {% else %}
+            <a href="#">Admin</a>
+          {% endif %}
         {% endif %}
+
         <a href="{{ url_for('logout') }}">Logout</a>
       {% else %}
         <a href="{{ url_for('login') }}">Login</a>
