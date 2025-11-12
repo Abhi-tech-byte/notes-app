@@ -17,6 +17,11 @@ from config import Config
 app = Flask(__name__)
 app.config.from_object(Config)
 app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25 MB
+app.config.setdefault("DB_INIT_DONE", False)
+
+# Ensure uploads folder exists (works locally & on Render)
+UPLOAD_ROOT = app.config.get("UPLOAD_FOLDER", os.path.join(os.getcwd(), "uploads"))
+os.makedirs(UPLOAD_ROOT, exist_ok=True)
 
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
@@ -50,7 +55,6 @@ class File(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     path = db.Column(db.String(255), nullable=False)
 
-
 # ------------------ HELPERS ------------------
 @login_manager.user_loader
 def load_user(user_id):
@@ -59,6 +63,37 @@ def load_user(user_id):
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def _ensure_db_initialized():
+    """
+    Safe to call multiple times. Creates tables and default admin if missing.
+    We call this once on the first received request (works under Gunicorn/Render).
+    """
+    if app.config.get("DB_INIT_DONE"):
+        return
+    with app.app_context():
+        db.create_all()
+        # default admin
+        if not User.query.filter_by(email="admin@local").first():
+            hashed_pw = bcrypt.generate_password_hash("admin123").decode("utf-8")
+            admin = User(
+                name="Admin",
+                email="admin@local",
+                password_hash=hashed_pw,
+                role="admin",
+            )
+            db.session.add(admin)
+            db.session.commit()
+            print("✅ Admin account created: admin@local / admin123")
+        app.config["DB_INIT_DONE"] = True
+        print("✅ Database initialized and ready.")
+
+
+# Call on every request until done (replacement for deprecated before_first_request)
+@app.before_request
+def _init_on_first_request():
+    _ensure_db_initialized()
 
 
 # ------------------ ROUTES ------------------
@@ -77,7 +112,7 @@ def create_folder():
         folder = Folder(name=name, created_by=current_user.id)
         db.session.add(folder)
         db.session.commit()
-        os.makedirs(os.path.join(app.config["UPLOAD_FOLDER"], name), exist_ok=True)
+        os.makedirs(os.path.join(UPLOAD_ROOT, name), exist_ok=True)
         flash("Folder created successfully!", "success")
     return redirect(url_for("dashboard"))
 
@@ -97,7 +132,7 @@ def upload_file(folder_id):
     file = request.files.get("file")
     if file and allowed_file(file.filename):
         filename = secure_filename(file.filename)
-        folder_path = os.path.join(app.config["UPLOAD_FOLDER"], folder.name)
+        folder_path = os.path.join(UPLOAD_ROOT, folder.name)
         os.makedirs(folder_path, exist_ok=True)
         file_path = os.path.join(folder_path, filename)
         file.save(file_path)
@@ -119,24 +154,24 @@ def upload_file(folder_id):
 @app.route("/files/<int:file_id>/download")
 @login_required
 def download_file(file_id):
-    file = File.query.get_or_404(file_id)
-    folder = Folder.query.get(file.folder_id)
-    folder_path = os.path.join(app.config["UPLOAD_FOLDER"], folder.name)
-    return send_from_directory(folder_path, file.filename, as_attachment=True)
+    f = File.query.get_or_404(file_id)
+    folder = Folder.query.get(f.folder_id)
+    folder_path = os.path.join(UPLOAD_ROOT, folder.name)
+    return send_from_directory(folder_path, f.filename, as_attachment=True)
 
 
 @app.route("/files/<int:file_id>/delete", methods=["POST"])
 @login_required
 def delete_file(file_id):
-    file = File.query.get_or_404(file_id)
+    f = File.query.get_or_404(file_id)
     if current_user.role != "admin":
         abort(403)
-    if os.path.exists(file.path):
-        os.remove(file.path)
-    db.session.delete(file)
+    if os.path.exists(f.path):
+        os.remove(f.path)
+    db.session.delete(f)
     db.session.commit()
     flash("File deleted!", "success")
-    return redirect(url_for("view_folder", folder_id=file.folder_id))
+    return redirect(url_for("view_folder", folder_id=f.folder_id))
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -170,32 +205,8 @@ def not_found_error(e):
     return render_template("404.html"), 404
 
 
-# ------------------ AUTO DB INIT FOR RENDER ------------------
-def _ensure_db_initialized():
-    """Creates tables and default admin when deployed under Gunicorn (Render)."""
-    try:
-        with app.app_context():
-            db.create_all()
-            if not User.query.filter_by(email="admin@local").first():
-                hashed_pw = bcrypt.generate_password_hash("admin123").decode("utf-8")
-                admin = User(
-                    name="Admin",
-                    email="admin@local",
-                    password_hash=hashed_pw,
-                    role="admin",
-                )
-                db.session.add(admin)
-                db.session.commit()
-                print("✅ Admin account created: admin@local / admin123")
-    except Exception as e:
-        print("⚠️ DB init failed:", e)
-
-
-_ensure_db_initialized()
-
-
 # ------------------ RUN LOCALLY ------------------
 if __name__ == "__main__":
-    with app.app_context():
-        _ensure_db_initialized()
+    # Local dev server; still ensures DB
+    _ensure_db_initialized()
     app.run(host="0.0.0.0", port=5050, debug=True)
