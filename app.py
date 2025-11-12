@@ -1,16 +1,17 @@
 import os
 from datetime import datetime
-from flask import Flask, render_template, redirect, url_for, request, flash, send_from_directory, abort
+from flask import Flask, render_template, redirect, url_for, request, flash, send_from_directory, abort, current_app
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_bcrypt import Bcrypt
 from werkzeug.utils import secure_filename
-from werkzeug.routing import BuildError  # <-- add
+from werkzeug.routing import BuildError
 from config import Config
 
+# ------------------ APP CONFIG ------------------
 app = Flask(__name__)
 app.config.from_object(Config)
-app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25 MB
 app.config.setdefault("DB_INIT_DONE", False)
 
 UPLOAD_ROOT = app.config.get("UPLOAD_FOLDER", os.path.join(os.getcwd(), "uploads"))
@@ -24,6 +25,7 @@ login_manager.login_message_category = "info"
 
 ALLOWED_EXTENSIONS = {"pdf", "png", "jpg", "jpeg", "docx", "txt"}
 
+# ------------------ MODELS ------------------
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), nullable=False)
@@ -45,9 +47,15 @@ class File(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     path = db.Column(db.String(255), nullable=False)
 
+# ------------------ HELPERS ------------------
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
+
+@app.context_processor
+def inject_globals():
+    # make current_app available in all templates
+    return dict(current_app=current_app)
 
 @app.context_processor
 def inject_user_and_safe_url():
@@ -84,6 +92,7 @@ except Exception as e:
 def _init_on_first_request():
     _ensure_db_initialized()
 
+# ------------------ ROUTES ------------------
 @app.route("/")
 @login_required
 def dashboard():
@@ -170,7 +179,7 @@ def logout():
     return redirect(url_for("login"))
 
 # ---------- ADMIN ----------
-@app.route("/admin/users", endpoint="admin_users")   # <-- explicit endpoint name
+@app.route("/admin/users", endpoint="admin_users")
 @login_required
 def admin_users():
     if current_user.role != "admin":
@@ -179,30 +188,7 @@ def admin_users():
     folders = Folder.query.all()
     return render_template("admin_users.html", users=users, folders=folders)
 
-@app.route("/admin/add_user", methods=["GET", "POST"], endpoint="add_user")  # explicit too
-@login_required
-def add_user():
-    if current_user.role != "admin":
-        abort(403)
-    if request.method == "POST":
-        name = request.form.get("name", "").strip()
-        email = request.form.get("email", "").strip()
-        password = request.form.get("password", "")
-        role = request.form.get("role", "member")
-        if not name or not email or not password:
-            flash("All fields are required.", "danger")
-            return redirect(url_for("add_user"))
-        if User.query.filter_by(email=email).first():
-            flash("User with that email already exists.", "danger")
-            return redirect(url_for("add_user"))
-        hashed_pw = bcrypt.generate_password_hash(password).decode("utf-8")
-        db.session.add(User(name=name, email=email, password_hash=hashed_pw, role=role))
-        db.session.commit()
-        flash("User created successfully!", "success")
-        return redirect(url_for("admin_users"))
-    return render_template("add_user.html")
-
-@app.route("/admin/grant", methods=["POST"], endpoint="grant_access")  # <-- explicit endpoint name
+@app.route("/admin/grant", methods=["POST"], endpoint="grant_access")
 @login_required
 def grant_access():
     if current_user.role != "admin":
