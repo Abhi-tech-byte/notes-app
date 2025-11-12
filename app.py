@@ -51,14 +51,6 @@ class File(db.Model):
     path = db.Column(db.String(255), nullable=False)
 
 
-class FolderAccess(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    folder_id = db.Column(db.Integer, db.ForeignKey('folder.id'))
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
-    can_upload = db.Column(db.Boolean, default=False)
-    can_view = db.Column(db.Boolean, default=True)
-
-
 # ------------------ HELPERS ------------------
 @login_manager.user_loader
 def load_user(user_id):
@@ -67,11 +59,6 @@ def load_user(user_id):
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
-
-
-@app.context_processor
-def inject_user():
-    return dict(user=current_user)
 
 
 # ------------------ ROUTES ------------------
@@ -99,18 +86,14 @@ def create_folder():
 @login_required
 def view_folder(folder_id):
     folder = Folder.query.get_or_404(folder_id)
-
-    # Everyone can view all folders (no restriction)
     files = File.query.filter_by(folder_id=folder.id).all()
-    return render_template("files.html", folder=folder, files=files)
+    return render_template("files.html", folder=folder, files=files, user=current_user)
 
 
 @app.route("/folders/<int:folder_id>/upload", methods=["POST"])
 @login_required
 def upload_file(folder_id):
     folder = Folder.query.get_or_404(folder_id)
-
-    # All members can upload, but only admins can delete
     file = request.files.get("file")
     if file and allowed_file(file.filename):
         filename = secure_filename(file.filename)
@@ -148,7 +131,8 @@ def delete_file(file_id):
     file = File.query.get_or_404(file_id)
     if current_user.role != "admin":
         abort(403)
-    os.remove(file.path)
+    if os.path.exists(file.path):
+        os.remove(file.path)
     db.session.delete(file)
     db.session.commit()
     flash("File deleted!", "success")
@@ -176,86 +160,42 @@ def logout():
     return redirect(url_for("login"))
 
 
-# ------------------ ADMIN PANEL ------------------
-@app.route("/admin/users")
-@login_required
-def admin_users():
-    if current_user.role != "admin":
-        abort(403)
-    users = User.query.all()
-    folders = Folder.query.all()
-    return render_template("admin_users.html", users=users, folders=folders)
+@app.errorhandler(403)
+def forbidden_error(e):
+    return render_template("403.html"), 403
 
 
-@app.route("/admin/grant", methods=["POST"])
-@login_required
-def grant_access():
-    if current_user.role != "admin":
-        abort(403)
-
-    user_id = request.form["user_id"]
-    folder_id = request.form["folder_id"]
-    can_upload = "can_upload" in request.form
-    can_view = "can_view" in request.form
-
-    existing = FolderAccess.query.filter_by(user_id=user_id, folder_id=folder_id).first()
-    if existing:
-        existing.can_upload = can_upload
-        existing.can_view = can_view
-    else:
-        new_access = FolderAccess(
-            user_id=user_id,
-            folder_id=folder_id,
-            can_upload=can_upload,
-            can_view=can_view
-        )
-        db.session.add(new_access)
-    db.session.commit()
-    flash("Access updated!", "success")
-    return redirect(url_for("admin_users"))
+@app.errorhandler(404)
+def not_found_error(e):
+    return render_template("404.html"), 404
 
 
-# ------------------ ADMIN: ADD USER ------------------
-@app.route("/admin/add_user", methods=["GET", "POST"])
-@login_required
-def add_user():
-    if current_user.role != "admin":
-        abort(403)
-
-    if request.method == "POST":
-        name = request.form["name"]
-        email = request.form["email"]
-        password = request.form["password"]
-        role = request.form["role"]
-
-        if User.query.filter_by(email=email).first():
-            flash("User with that email already exists!", "danger")
-            return redirect(url_for("add_user"))
-
-        hashed_pw = bcrypt.generate_password_hash(password).decode("utf-8")
-        new_user = User(name=name, email=email, password_hash=hashed_pw, role=role)
-        db.session.add(new_user)
-        db.session.commit()
-        flash("User created successfully!", "success")
-        return redirect(url_for("admin_users"))
-
-    return render_template("add_user.html")
+# ------------------ AUTO DB INIT FOR RENDER ------------------
+def _ensure_db_initialized():
+    """Creates tables and default admin when deployed under Gunicorn (Render)."""
+    try:
+        with app.app_context():
+            db.create_all()
+            if not User.query.filter_by(email="admin@local").first():
+                hashed_pw = bcrypt.generate_password_hash("admin123").decode("utf-8")
+                admin = User(
+                    name="Admin",
+                    email="admin@local",
+                    password_hash=hashed_pw,
+                    role="admin",
+                )
+                db.session.add(admin)
+                db.session.commit()
+                print("✅ Admin account created: admin@local / admin123")
+    except Exception as e:
+        print("⚠️ DB init failed:", e)
 
 
-# ------------------ DB INIT ------------------
+_ensure_db_initialized()
+
+
+# ------------------ RUN LOCALLY ------------------
 if __name__ == "__main__":
     with app.app_context():
-        db.create_all()
-        if not User.query.first():
-            hashed_pw = bcrypt.generate_password_hash("admin123").decode("utf-8")
-            admin = User(
-                name="Admin",
-                email="admin@local",
-                password_hash=hashed_pw,
-                role="admin",
-            )
-            db.session.add(admin)
-            db.session.commit()
-            print("✅ Admin account created: admin@local / admin123")
-
-    app.run(host="0.0.0.0",debug=True, port=5050)
+        _ensure_db_initialized()
+    app.run(host="0.0.0.0", port=5050, debug=True)
