@@ -5,15 +5,14 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_bcrypt import Bcrypt
 from werkzeug.utils import secure_filename
+from werkzeug.routing import BuildError  # <-- add
 from config import Config
 
-# ------------------ APP CONFIG ------------------
 app = Flask(__name__)
 app.config.from_object(Config)
-app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25 MB
+app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024
 app.config.setdefault("DB_INIT_DONE", False)
 
-# Ensure uploads folder exists
 UPLOAD_ROOT = app.config.get("UPLOAD_FOLDER", os.path.join(os.getcwd(), "uploads"))
 os.makedirs(UPLOAD_ROOT, exist_ok=True)
 
@@ -25,7 +24,6 @@ login_manager.login_message_category = "info"
 
 ALLOWED_EXTENSIONS = {"pdf", "png", "jpg", "jpeg", "docx", "txt"}
 
-# ------------------ MODELS ------------------
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), nullable=False)
@@ -47,20 +45,23 @@ class File(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     path = db.Column(db.String(255), nullable=False)
 
-# ------------------ HELPERS ------------------
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
 @app.context_processor
-def inject_user():
-    return dict(user=current_user)
+def inject_user_and_safe_url():
+    def url_for_safe(endpoint, **values):
+        try:
+            return url_for(endpoint, **values)
+        except BuildError:
+            return "#"
+    return dict(user=current_user, url_for_safe=url_for_safe)
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def _ensure_db_initialized():
-    """Create tables + default admin. Safe to call many times."""
     if app.config.get("DB_INIT_DONE"):
         return
     with app.app_context():
@@ -74,18 +75,15 @@ def _ensure_db_initialized():
         app.config["DB_INIT_DONE"] = True
         print("✅ Database initialized.")
 
-# Initialize DB at import (for Render)
 try:
     _ensure_db_initialized()
 except Exception as e:
     print("⚠️ DB init at import failed:", e)
 
-# Also initialize DB on first request (backup)
 @app.before_request
 def _init_on_first_request():
     _ensure_db_initialized()
 
-# ------------------ ROUTES ------------------
 @app.route("/")
 @login_required
 def dashboard():
@@ -152,7 +150,7 @@ def delete_file(file_id):
     flash("File deleted!", "success")
     return redirect(url_for("view_folder", folder_id=f.folder_id))
 
-# ------------------ AUTH ------------------
+# ---------- AUTH ----------
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -171,8 +169,8 @@ def logout():
     logout_user()
     return redirect(url_for("login"))
 
-# ------------------ ADMIN PANEL ------------------
-@app.route("/admin/users")
+# ---------- ADMIN ----------
+@app.route("/admin/users", endpoint="admin_users")   # <-- explicit endpoint name
 @login_required
 def admin_users():
     if current_user.role != "admin":
@@ -181,7 +179,7 @@ def admin_users():
     folders = Folder.query.all()
     return render_template("admin_users.html", users=users, folders=folders)
 
-@app.route("/admin/add_user", methods=["GET", "POST"])
+@app.route("/admin/add_user", methods=["GET", "POST"], endpoint="add_user")  # explicit too
 @login_required
 def add_user():
     if current_user.role != "admin":
@@ -204,16 +202,15 @@ def add_user():
         return redirect(url_for("admin_users"))
     return render_template("add_user.html")
 
-@app.route("/admin/grant", methods=["POST"])
+@app.route("/admin/grant", methods=["POST"], endpoint="grant_access")  # <-- explicit endpoint name
 @login_required
 def grant_access():
-    """Dummy route to satisfy template references — all users already have access."""
     if current_user.role != "admin":
         abort(403)
     flash("Access system simplified: all members can view & upload. No manual grant required.", "info")
     return redirect(url_for("admin_users"))
 
-# ------------------ ERRORS ------------------
+# ---------- ERRORS ----------
 @app.errorhandler(403)
 def forbidden_error(e):
     return render_template("403.html"), 403
@@ -222,7 +219,7 @@ def forbidden_error(e):
 def not_found_error(e):
     return render_template("404.html"), 404
 
-# ------------------ RUN LOCALLY ------------------
+# ---------- LOCAL RUN ----------
 if __name__ == "__main__":
     _ensure_db_initialized()
     app.run(host="0.0.0.0", port=5050, debug=True)
