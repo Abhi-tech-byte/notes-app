@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+  <h2 style="margin-bottom:10px;">Admin Panel – Manage Folder Access</h2>
+
+  <!-- Add New User Button -->
+  <div style="margin-bottom:20px;">
+    <a href="{{ url_for('add_user') }}">
+      <button style="
+        background:#0078d4;
+        color:white;
+        border:none;
+        padding:8px 14px;
+        border-radius:4px;
+        cursor:pointer;
+      ">
+        ➕ Add New User
+      </button>
+    </a>
+  </div>
+
+  <!-- Grant Access Form -->
+  <form method="POST" action="{{ url_for('grant_access') }}" 
+        style="background:white;padding:20px;border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,0.1);">
+    
+    <div style="margin-bottom:15px;">
+      <label><b>User:</b></label><br>
+      <select name="user_id" required>
+        {% for u in users %}
+          <option value="{{ u.id }}">{{ u.name }} ({{ u.role }})</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div style="margin-bottom:15px;">
+      <label><b>Folder:</b></label><br>
+      <select name="folder_id" required>
+        {% for f in folders %}
+          <option value="{{ f.id }}">{{ f.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:15px;margin-top:10px;">
+      <label style="display:flex;align-items:center;gap:5px;">
+        <input type="checkbox" name="can_view">
+        <span>Can View</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:5px;">
+        <input type="checkbox" name="can_upload">
+        <span>Can Upload</span>
+      </label>
+    </div>
+
+    <br>
+    <button type="submit" style="margin-top:10px;">Grant Access</button>
+  </form>
+
+  <br>
+  <a href="{{ url_for('dashboard') }}">⬅ Back to Dashboard</a>
+</div>
+{% endblock %}

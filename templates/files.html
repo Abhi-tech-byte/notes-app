@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+  <h2>Folder: {{ folder.name }}</h2>
+
+  <form action="{{ url_for('upload_file', folder_id=folder.id) }}" method="POST" enctype="multipart/form-data">
+    <input type="file" name="file" required>
+    <button type="submit">Upload</button>
+  </form>
+
+  <h3>Files</h3>
+  <ul>
+    {% for file in files %}
+      <li>
+        {{ file.filename }}
+        <a href="{{ url_for('download_file', file_id=file.id) }}">Download</a>
+        {% if user.role == 'admin' %}
+          <form action="{{ url_for('delete_file', file_id=file.id) }}" method="POST" style="display:inline;">
+            <button type="submit">Delete</button>
+          </form>
+        {% endif %}
+      </li>
+    {% else %}
+      <li>No files yet</li>
+    {% endfor %}
+  </ul>
+
+  <a href="{{ url_for('dashboard') }}">Back</a>
+</div>
+{% endblock %}

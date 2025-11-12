@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container" style="max-width:500px;background:white;padding:20px;border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,0.1);">
+  <h2>Add New User</h2>
+
+  <form method="POST" action="{{ url_for('add_user') }}">
+    <label><b>Name:</b></label>
+    <input type="text" name="name" required>
+
+    <label><b>Email:</b></label>
+    <input type="email" name="email" required>
+
+    <label><b>Password:</b></label>
+    <input type="password" name="password" required>
+
+    <label><b>Role:</b></label>
+    <select name="role" required>
+      <option value="member">Member</option>
+      <option value="admin">Admin</option>
+    </select>
+
+    <br><br>
+    <button type="submit">✅ Create User</button>
+  </form>
+
+  <br>
+  <a href="{{ url_for('admin_users') }}">⬅ Back to Admin Panel</a>
+</div>
+{% endblock %}
