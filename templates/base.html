@@ -18,7 +18,7 @@
         <a href="{{ url_for('dashboard') }}">Dashboard</a>
 
         {% if current_user.role == 'admin' %}
-          {% if 'admin_users' in current_app.view_functions %}
+          {% if endpoint_exists and endpoint_exists('admin_users') %}
             <a href="{{ url_for('admin_users') }}">Admin</a>
           {% else %}
             <a href="#">Admin</a>
@@ -51,3 +51,4 @@
   </footer>
 </body>
 </html>
+
