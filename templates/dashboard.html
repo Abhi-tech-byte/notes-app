@@ -1,22 +1,27 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="container">
-  <h2>Welcome {{ user.name }}</h2>
-  <p>Your role: {{ user.role }}</p>
 
-  <h3>Create New Folder</h3>
-  <form action="{{ url_for('create_folder') }}" method="POST">
-    <input name="name" placeholder="Folder name" required>
-    <button type="submit">Create Folder</button>
+<div class="dashboard-container">
+  <h2>Your Folders</h2>
+
+  <!-- Folder creation form -->
+  <form action="{{ url_for('create_folder') }}" method="POST" class="folder-form">
+    <input type="text" name="name" placeholder="Enter folder name" required>
+    <button type="submit">+ Create Folder</button>
   </form>
 
-  <h3>Folders</h3>
-  <ul>
-    {% for f in folders %}
-      <li><a href="{{ url_for('view_folder', folder_id=f.id) }}">{{ f.name }}</a></li>
+  <!-- Folder list -->
+  <div class="folder-grid">
+    {% for folder in folders %}
+      <div class="folder-card">
+        <div class="folder-icon">📁</div>
+        <h3>{{ folder.name }}</h3>
+        <a class="btn-view" href="{{ url_for('view_folder', folder_id=folder.id) }}">View Files</a>
+      </div>
     {% else %}
-      <li>No folders yet</li>
+      <p class="no-folder">No folders yet. Create one above!</p>
     {% endfor %}
-  </ul>
+  </div>
 </div>
+
 {% endblock %}
