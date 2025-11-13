@@ -33,11 +33,13 @@ class User(db.Model, UserMixin):
     password_hash = db.Column(db.String(200), nullable=False)
     role = db.Column(db.String(20), default="member")
 
+
 class Folder(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     created_by = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
 
 class File(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -47,15 +49,18 @@ class File(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     path = db.Column(db.String(255), nullable=False)
 
+
 # ------------------ HELPERS ------------------
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
+
 @app.context_processor
 def inject_globals():
     # make current_app available in all templates
     return dict(current_app=current_app)
+
 
 @app.context_processor
 def inject_user_and_safe_url():
@@ -66,8 +71,16 @@ def inject_user_and_safe_url():
             return "#"
     return dict(user=current_user, url_for_safe=url_for_safe)
 
+
+# ✅ NEW: make endpoint_exists available to Jinja templates
+@app.context_processor
+def endpoint_helpers():
+    return dict(endpoint_exists=lambda name: name in app.view_functions)
+
+
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
 
 def _ensure_db_initialized():
     if app.config.get("DB_INIT_DONE"):
@@ -83,14 +96,17 @@ def _ensure_db_initialized():
         app.config["DB_INIT_DONE"] = True
         print("✅ Database initialized.")
 
+
 try:
     _ensure_db_initialized()
 except Exception as e:
     print("⚠️ DB init at import failed:", e)
 
+
 @app.before_request
 def _init_on_first_request():
     _ensure_db_initialized()
+
 
 # ------------------ ROUTES ------------------
 @app.route("/")
@@ -98,6 +114,7 @@ def _init_on_first_request():
 def dashboard():
     folders = Folder.query.all()
     return render_template("dashboard.html", folders=folders)
+
 
 @app.route("/folders/new", methods=["POST"])
 @login_required
@@ -113,12 +130,14 @@ def create_folder():
         flash("Folder name is required.", "danger")
     return redirect(url_for("dashboard"))
 
+
 @app.route("/folders/<int:folder_id>")
 @login_required
 def view_folder(folder_id):
     folder = Folder.query.get_or_404(folder_id)
     files = File.query.filter_by(folder_id=folder.id).all()
     return render_template("files.html", folder=folder, files=files)
+
 
 @app.route("/folders/<int:folder_id>/upload", methods=["POST"])
 @login_required
@@ -138,6 +157,7 @@ def upload_file(folder_id):
         flash("Invalid file type!", "danger")
     return redirect(url_for("view_folder", folder_id=folder.id))
 
+
 @app.route("/files/<int:file_id>/download")
 @login_required
 def download_file(file_id):
@@ -145,6 +165,7 @@ def download_file(file_id):
     folder = Folder.query.get(f.folder_id)
     folder_path = os.path.join(UPLOAD_ROOT, folder.name)
     return send_from_directory(folder_path, f.filename, as_attachment=True)
+
 
 @app.route("/files/<int:file_id>/delete", methods=["POST"])
 @login_required
@@ -159,6 +180,34 @@ def delete_file(file_id):
     flash("File deleted!", "success")
     return redirect(url_for("view_folder", folder_id=f.folder_id))
 
+@app.route("/admin/add_user", methods=["POST"], endpoint="add_user")
+@login_required
+def add_user():
+    if current_user.role != "admin":
+        abort(403)
+
+    name = request.form.get("name", "").strip()
+    email = request.form.get("email", "").strip()
+    password = request.form.get("password", "").strip()
+
+    if not name or not email or not password:
+        flash("All fields are required.", "danger")
+        return redirect(url_for("admin_users"))
+
+    if User.query.filter_by(email=email).first():
+        flash("User with this email already exists.", "warning")
+        return redirect(url_for("admin_users"))
+
+    hashed_pw = bcrypt.generate_password_hash(password).decode("utf-8")
+    new_user = User(name=name, email=email, password_hash=hashed_pw, role="member")
+    db.session.add(new_user)
+    db.session.commit()
+
+    flash("User added successfully!", "success")
+    return redirect(url_for("admin_users"))
+
+
+
 # ---------- AUTH ----------
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -172,11 +221,13 @@ def login():
         flash("Invalid email or password", "danger")
     return render_template("login.html")
 
+
 @app.route("/logout")
 @login_required
 def logout():
     logout_user()
     return redirect(url_for("login"))
+
 
 # ---------- ADMIN ----------
 @app.route("/admin/users", endpoint="admin_users")
@@ -188,6 +239,7 @@ def admin_users():
     folders = Folder.query.all()
     return render_template("admin_users.html", users=users, folders=folders)
 
+
 @app.route("/admin/grant", methods=["POST"], endpoint="grant_access")
 @login_required
 def grant_access():
@@ -196,14 +248,17 @@ def grant_access():
     flash("Access system simplified: all members can view & upload. No manual grant required.", "info")
     return redirect(url_for("admin_users"))
 
+
 # ---------- ERRORS ----------
 @app.errorhandler(403)
 def forbidden_error(e):
     return render_template("403.html"), 403
 
+
 @app.errorhandler(404)
 def not_found_error(e):
     return render_template("404.html"), 404
+
 
 # ---------- LOCAL RUN ----------
 if __name__ == "__main__":
